@@ -292,9 +292,13 @@ def writeCache(feed_uri, feed_info, data):
 
 def httpThread(thread_index, input_queue, output_queue, log):
     import requests
-#    from httplib import BadStatusLine
+    from cachecontrol import CacheControl
+    from cachecontrol.caches.file_cache import FileCache
+	
+	# request-cache works differently from httplib2 caching so:
 
-#    h = httplib2.Http(config.http_cache_directory())
+
+    cached_session = CacheControl(requests.session(), cache=FileCache(config.http_cache_directory())) 
 
     uri, feed_info = input_queue.get(block=True)
     while uri:
@@ -316,7 +320,7 @@ def httpThread(thread_index, input_queue, output_queue, log):
                 idna = uri
 
             # cache control headers
-            headerS = {}
+            headers = {}
             if feed_info.feed.has_key('planet_http_etag'):
                 headers['If-None-Match'] = feed_info.feed['planet_http_etag']
             if feed_info.feed.has_key('planet_http_last_modified'):
@@ -326,11 +330,10 @@ def httpThread(thread_index, input_queue, output_queue, log):
             headers['User-Agent'] = 'planet-mozilla'
 
             # issue request 
-#	(resp, content) = h.request(idna, 'GET', headers=headers)
-	    req = requests.get(idna, headers=headers)
-	    content = req.content
-	    resp = req.headers
-
+            req = cached_session.get(idna, headers=headers)
+            content = req.content
+            resp = req.headers
+	    
             # unchanged detection
             resp['-content-hash'] = md5(content or '').hexdigest()
             if resp.status == 200:
@@ -347,11 +350,10 @@ def httpThread(thread_index, input_queue, output_queue, log):
             if resp.has_key('content-encoding'):
                 del resp['content-encoding']
             setattr(feed, 'headers', resp)
-        except BadStatusLine:
-            log.error("Bad Status Line received for %s via %d",
-                uri, thread_index)
-        except httplib2.HttpLib2Error, e:
-            log.error("HttpLib2Error: %s via %d", str(e), thread_index)
+        except requests.RequestException, e:
+            log.error("An ambiguous exception occured while requesting %s in thread %d: %s.",
+                uri, thread_index, e)
+	#probably need something in here for caching errors. But what?
         except socket.error, e:
             if e.__class__.__name__.lower()=='timeout':
                 feed.headers['status'] = '408'
