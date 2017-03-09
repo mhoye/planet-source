@@ -291,10 +291,11 @@ def writeCache(feed_uri, feed_info, data):
     xdoc.unlink()
 
 def httpThread(thread_index, input_queue, output_queue, log):
-    import httplib2
-    from httplib import BadStatusLine
+    import requests
+#    from httplib import BadStatusLine
 
-    h = httplib2.Http(config.http_cache_directory())
+#    h = httplib2.Http(config.http_cache_directory())
+
     uri, feed_info = input_queue.get(block=True)
     while uri:
         log.info("Fetching %s via %d", uri, thread_index)
@@ -315,17 +316,20 @@ def httpThread(thread_index, input_queue, output_queue, log):
                 idna = uri
 
             # cache control headers
-            headers = {}
+            headerS = {}
             if feed_info.feed.has_key('planet_http_etag'):
                 headers['If-None-Match'] = feed_info.feed['planet_http_etag']
             if feed_info.feed.has_key('planet_http_last_modified'):
                 headers['If-Modified-Since'] = \
                     feed_info.feed['planet_http_last_modified']
 
-            headers['User-Agent'] = 'venus'
+            headers['User-Agent'] = 'planet-mozilla'
 
-            # issue request
-            (resp, content) = h.request(idna, 'GET', headers=headers)
+            # issue request 
+#	(resp, content) = h.request(idna, 'GET', headers=headers)
+	    req = requests.get(idna, headers=headers)
+	    content = req.content
+	    resp = req.headers
 
             # unchanged detection
             resp['-content-hash'] = md5(content or '').hexdigest()
