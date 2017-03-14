@@ -333,23 +333,23 @@ def httpThread(thread_index, input_queue, output_queue, log):
             req = cached_session.get(idna, headers=headers)
             content = req.content
             resp = req.headers
-	    
+	
             # unchanged detection
-            resp['-content-hash'] = md5(content or '').hexdigest()
-            if resp.status == 200:
-                if resp.fromcache:
-                    resp.status = 304
-                elif feed_info.feed.has_key('planet_content_hash') and \
-                    feed_info.feed['planet_content_hash'] == \
-                    resp['-content-hash']:
-                    resp.status = 304
+            #resp['-content-hash'] = md5(content or '').hexdigest()
+            #if resp.status == 200:
+            #    if resp.fromcache:
+            #        resp.status = 304
+            #    elif feed_info.feed.has_key('planet_content_hash') and \
+            #        feed_info.feed['planet_content_hash'] == \
+            #        resp['-content-hash']:
+            #        resp.status = 304
 
             # build a file-like object
             feed = StringIO(content) 
-            setattr(feed, 'url', resp.get('content-location', uri))
+            feed.url = resp.get('content-location', uri)
             if resp.has_key('content-encoding'):
                 del resp['content-encoding']
-            setattr(feed, 'headers', resp)
+            feed.headers = resp
         except requests.RequestException, e:
             log.error("An ambiguous exception occured while requesting %s in thread %d: %s.",
                 uri, thread_index, e)
