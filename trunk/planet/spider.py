@@ -301,6 +301,7 @@ def httpThread(thread_index, input_queue, output_queue, log):
     cached_session = CacheControl(requests.session(), cache=FileCache(config.http_cache_directory())) 
 
     uri, feed_info = input_queue.get(block=True)
+
     while uri:
         log.info("Fetching %s via %d", uri, thread_index)
         feed = StringIO('')
@@ -326,28 +327,27 @@ def httpThread(thread_index, input_queue, output_queue, log):
             if feed_info.feed.has_key('planet_http_last_modified'):
                 headers['If-Modified-Since'] = \
                     feed_info.feed['planet_http_last_modified']
-
             headers['User-Agent'] = 'planet-mozilla'
 
-            # issue request 
+            # issue REQUEST 
             req = cached_session.get(idna, headers=headers)
             content = req.content
             resp = req.headers
-	    
-            # unchanged detection
-            resp['-content-hash'] = md5(content or '').hexdigest()
-            if resp.status == 200:
-                if resp.fromcache:
-                    resp.status = 304
-                elif feed_info.feed.has_key('planet_content_hash') and \
-                    feed_info.feed['planet_content_hash'] == \
-                    resp['-content-hash']:
-                    resp.status = 304
+            print(req)
+            #resp['-content-hash'] = md5(content or '').hexdigest()
+	   #local_hash = md5(content or '').hexdigest()
+            #if req.status_code == 200:
+            #    if resp.fromcache:
+            #        req.status_code = 304
+            #    elif feed_info.feed.has_key('planet_content_hash') and \
+            #        feed_info.feed['planet_content_hash'] == \
+            #        local_hash:
+            #        req.status_code = 304
 
             # build a file-like object
             feed = StringIO(content) 
-            setattr(feed, 'url', resp.get('content-location', uri))
-            if resp.has_key('content-encoding'):
+            feed['url'] = resp.get('content-location', uri)
+            if ('content-encoding') in resp:
                 del resp['content-encoding']
             setattr(feed, 'headers', resp)
         except requests.RequestException, e:
@@ -442,9 +442,9 @@ def spiderPlanet(only_if_new = False):
             (uri, feed_info, feed) = parse_queue.get(False)
             try:
 
-                if not hasattr(feed,'headers') or int(feed.headers.status)<300:
+                if 'headers' not in feed or int(feed.headers.status)<300:
                     options = {}
-                    if hasattr(feed_info,'feed'):
+                    if 'feed' not in feed_info:
                         options['etag'] = \
                             feed_info.feed.get('planet_http_etag',None)
                         try:
