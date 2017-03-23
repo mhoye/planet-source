@@ -305,9 +305,9 @@ def httpThread(thread_index, input_queue, output_queue, log):
     while uri:
         log.info("Fetching %s via %d", uri, thread_index)
         feed = StringIO('')
-        setattr(feed, 'url', uri)
-        setattr(feed, 'headers', 
-            feedparser.FeedParserDict({'status':'500'}))
+        feed.url = uri
+        feed.headers = feedparser.FeedParserDict({'status':'500'})
+
         try:
             # map IRI => URI
             try:
@@ -322,20 +322,22 @@ def httpThread(thread_index, input_queue, output_queue, log):
 
             # cache control headers
             headers = {}
-            if feed_info.feed.has_key('planet_http_etag'):
+            if 'planet_http_etag' in feed_info.feed:
                 headers['If-None-Match'] = feed_info.feed['planet_http_etag']
-            if feed_info.feed.has_key('planet_http_last_modified'):
+            if 'planet_http_last_modified' in feed_info.feed:
                 headers['If-Modified-Since'] = \
                     feed_info.feed['planet_http_last_modified']
+
             headers['User-Agent'] = 'planet-mozilla'
 
             # issue REQUEST 
             req = cached_session.get(idna, headers=headers)
             content = req.content
-            resp = req.headers
-	
+            resp = dict(**req.headers)
+	    #setattr(resp, dict, this)
+
             # unchanged detection
-            #resp['-content-hash'] = md5(content or '').hexdigest()
+            resp['-content-hash'] = md5(content or '').hexdigest()
             #if resp.status == 200:
             #    if resp.fromcache:
             #        resp.status = 304
@@ -347,9 +349,15 @@ def httpThread(thread_index, input_queue, output_queue, log):
             # build a file-like object
             feed = StringIO(content) 
             feed.url = resp.get('content-location', uri)
-            if resp.has_key('content-encoding'):
+            if 'content-encoding' in resp:
                 del resp['content-encoding']
             feed.headers = resp
+        except requests.HTTPError, e:
+            log.error("HTTP error when requesting %s: %s", uri, e)
+        except requests.ConnectionError, e:
+            log.error("Connection Error when requesting %s", uri)
+        except requests.Timeout, e:
+            log.error("Timeout error: %s", uri)
         except requests.RequestException, e:
             log.error("An ambiguous exception occured while requesting %s in thread %d: %s.",
                 uri, thread_index, e)
@@ -453,7 +461,6 @@ def spiderPlanet(only_if_new = False):
                                 None))
                         except:
                             pass
-
                     data = feedparser.parse(feed, **options)
                 else:
                     data = feedparser.FeedParserDict({'version': None,
