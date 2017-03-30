@@ -361,7 +361,7 @@ def httpThread(thread_index, input_queue, output_queue, log):
         except requests.RequestException, e:
             log.error("An ambiguous exception occured while requesting %s in thread %d: %s.",
                 uri, thread_index, e)
-	#probably need something in here for caching errors. But what?
+        #probably need something in here for caching errors. But what?
         except socket.error, e:
             if e.__class__.__name__.lower()=='timeout':
                 feed.headers['status'] = '408'
