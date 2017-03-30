@@ -70,7 +70,6 @@ def writeCache(feed_uri, feed_info, data):
     log = planet.logger
     sources = config.cache_sources_directory()
     blacklist = config.cache_blacklist_directory()
-
     # capture http status
     if not data.has_key("status"):
         if data.has_key("entries") and len(data.entries)>0:
@@ -138,15 +137,16 @@ def writeCache(feed_uri, feed_info, data):
             data.feed['planet_http_etag'] = data.etag
         elif data.headers.has_key('etag') and data.headers['etag']:
             data.feed['planet_http_etag'] =  data.headers['etag']
-
         if data.headers.has_key('last-modified'):
-            data.feed['planet_http_last_modified']=data.headers['last-modified']
+            data.feed['planet_http_last_modified'] = data.headers['last-modified']
         elif data.has_key('modified') and data.modified:
-            data.feed['planet_http_last_modified'] = time.asctime(data.modified)
-
+            try:
+                data.feed['planet_http_last_modified'] = time.asctime(data.modified)
+            except:
+                data.feed['planet_http_last_modified'] = data.modified
         if data.headers.has_key('-content-hash'):
             data.feed['planet_content_hash'] = data.headers['-content-hash']
-
+    
     # capture feed and data from the planet configuration file
     if data.get('version'):
         if not data.feed.has_key('links'): data.feed['links'] = list()
@@ -247,6 +247,7 @@ def writeCache(feed_uri, feed_info, data):
 
     if index: index.close()
 
+    
     # identify inactive feeds
     if config.activity_threshold(feed_uri):
         updated = [entry.updated_parsed for entry in data.entries
@@ -258,8 +259,7 @@ def writeCache(feed_uri, feed_info, data):
                 time.strftime("%Y-%m-%dT%H:%M:%SZ", updated[-1])
         elif data.feed.has_key('planet_updated'):
            updated = [feedparser._parse_date_iso8601(data.feed.planet_updated)]
-
-        if not updated or updated[-1] < activity_horizon:
+        elif not updated:
             msg = "no activity in %d days" % config.activity_threshold(feed_uri)
             log.info(msg)
             data.feed['planet_message'] = msg
@@ -331,10 +331,9 @@ def httpThread(thread_index, input_queue, output_queue, log):
             headers['User-Agent'] = 'planet-mozilla'
 
             # issue REQUEST 
-            req = cached_session.get(idna, headers=headers)
+            req = cached_session.get(idna, headers=headers, verify=True)
             content = req.content
             resp = dict(**req.headers)
-	    #setattr(resp, dict, this)
 
             # unchanged detection
             resp['-content-hash'] = md5(content or '').hexdigest()
@@ -347,11 +346,12 @@ def httpThread(thread_index, input_queue, output_queue, log):
             #        resp.status = 304
 
             # build a file-like object
-            feed = StringIO(content) 
+            feed = StringIO(content)
             feed.url = resp.get('content-location', uri)
             if 'content-encoding' in resp:
                 del resp['content-encoding']
             feed.headers = resp
+
         except requests.HTTPError, e:
             log.error("HTTP error when requesting %s: %s", uri, e)
         except requests.ConnectionError, e:
@@ -467,11 +467,9 @@ def spiderPlanet(only_if_new = False):
                         'headers': feed.headers, 'entries': [], 'feed': {},
                         'href': feed.url, 'bozo': 0,
                         'status': int(feed.headers.status)})
-
                 # duplicate feed?
                 id = data.feed.get('id', None)
                 if not id: id = feed_info.feed.get('id', None)
-
                 href=uri
                 if data.has_key('href'): href=data.href
 
