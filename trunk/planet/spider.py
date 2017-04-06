@@ -70,6 +70,7 @@ def writeCache(feed_uri, feed_info, data):
     log = planet.logger
     sources = config.cache_sources_directory()
     blacklist = config.cache_blacklist_directory()
+
     # capture http status
     if not data.has_key("status"):
         if data.has_key("entries") and len(data.entries)>0:
@@ -102,7 +103,6 @@ def writeCache(feed_uri, feed_info, data):
             log.info("Feed %s unchanged", feed_uri)
         else:
             log.info("Feed %s unchanged @ %s", feed_uri, data.url)
-
         if not feed_info.feed.has_key('planet_message'):
             if feed_info.feed.has_key('planet_updated'):
                 updated = feed_info.feed.planet_updated
@@ -136,17 +136,15 @@ def writeCache(feed_uri, feed_info, data):
         if data.has_key('etag') and data.etag:
             data.feed['planet_http_etag'] = data.etag
         elif data.headers.has_key('etag') and data.headers['etag']:
-            data.feed['planet_http_etag'] =  data.headers['etag']
+            data.feed['planet_http_etag'] = data.headers['etag']
         if data.headers.has_key('last-modified'):
             data.feed['planet_http_last_modified'] = data.headers['last-modified']
         elif data.has_key('modified') and data.modified:
-            try:
-                data.feed['planet_http_last_modified'] = time.asctime(data.modified)
-            except:
-                data.feed['planet_http_last_modified'] = data.modified
+            data.feed['planet_http_last_modified'] = time.asctime(data.modified)
+
         if data.headers.has_key('-content-hash'):
             data.feed['planet_content_hash'] = data.headers['-content-hash']
-    
+
     # capture feed and data from the planet configuration file
     if data.get('version'):
         if not data.feed.has_key('links'): data.feed['links'] = list()
@@ -195,7 +193,6 @@ def writeCache(feed_uri, feed_info, data):
 
         # compute blacklist file name based on the id
         blacklist_file = filename(blacklist, entry.id)  
-
         # check if blacklist file exists. If so, skip it. 
         if os.path.exists(blacklist_file):
            continue
@@ -247,7 +244,7 @@ def writeCache(feed_uri, feed_info, data):
 
     if index: index.close()
 
-    
+    print config.activity_threshold(feed_uri)
     # identify inactive feeds
     if config.activity_threshold(feed_uri):
         updated = [entry.updated_parsed for entry in data.entries
@@ -259,7 +256,8 @@ def writeCache(feed_uri, feed_info, data):
                 time.strftime("%Y-%m-%dT%H:%M:%SZ", updated[-1])
         elif data.feed.has_key('planet_updated'):
            updated = [feedparser._parse_date_iso8601(data.feed.planet_updated)]
-        elif not updated:
+
+        if not updated or updated[-1] < activity_horizon:
             msg = "no activity in %d days" % config.activity_threshold(feed_uri)
             log.info(msg)
             data.feed['planet_message'] = msg
@@ -290,24 +288,63 @@ def writeCache(feed_uri, feed_info, data):
     write(xdoc.toxml().encode('utf-8'), filename(sources, feed_uri))
     xdoc.unlink()
 
+
+def fakeResponse(req):
+
+""" Replacing httplib2 with Requests without rewriting the planet (har har)
+    means that we need to assemble a fake Response object out of the header set
+    returned by a Request. Shenanigans ahead. """
+
+    import httplib2 
+    info = dict()
+    info['status'] = 200
+    fake = httplib2.Response(info)
+
+    
+    for keys in req.headers:
+        setattr(fake, str(keys).lower(), req.headers[keys])
+
+    # We're handling the status like this because httplib2 expects an int there,
+    # but some web servers will hand you "200 OK" instead of 200, and Requests 
+    # doesn't always do the right thing.
+
+    fake.status    = int(str(req.status_code).split(' ')[0])
+
+    # fromcache and versions have no equivalent in Requests that I can see, so
+    # we're just going to lie about it. Per the docs, "11" means "HTTP/1.1",
+    # so, this might conceivably break something in a future HTTP2-friendly world.
+
+    fake.fromcache = False
+    fake.version   = '11'    
+    fake.reason    = req.reason  
+
+    if req.history :
+        fake.previous = (req.history[-2]).url
+    else:
+        fake.previous = req.url
+
+    setattr(fake, 'content-location', req.url)
+
+    # This is particular to Planet's in-house caching sytem.
+    fake['-content-hash'] =  ''
+
+    return fake
+
 def httpThread(thread_index, input_queue, output_queue, log):
+
     import requests
     from cachecontrol import CacheControl
     from cachecontrol.caches.file_cache import FileCache
-	
-	# request-cache works differently from httplib2 caching so:
 
-
-    cached_session = CacheControl(requests.session(), cache=FileCache(config.http_cache_directory())) 
+    cached_session = CacheControl(requests.session(), cache=FileCache(config.http_cache_directory()))
 
     uri, feed_info = input_queue.get(block=True)
-
     while uri:
         log.info("Fetching %s via %d", uri, thread_index)
         feed = StringIO('')
-        feed.url = uri
-        feed.headers = feedparser.FeedParserDict({'status':'500'})
-
+        setattr(feed, 'url', uri)
+        setattr(feed, 'headers', 
+            feedparser.FeedParserDict({'status':'500'}))
         try:
             # map IRI => URI
             try:
@@ -322,35 +359,36 @@ def httpThread(thread_index, input_queue, output_queue, log):
 
             # cache control headers
             headers = {}
-            if 'planet_http_etag' in feed_info.feed:
+            if feed_info.feed.has_key('planet_http_etag'):
                 headers['If-None-Match'] = feed_info.feed['planet_http_etag']
-            if 'planet_http_last_modified' in feed_info.feed:
+            if feed_info.feed.has_key('planet_http_last_modified'):
                 headers['If-Modified-Since'] = \
                     feed_info.feed['planet_http_last_modified']
 
-            headers['User-Agent'] = 'planet-mozilla'
+            headers['User-Agent'] = 'venus'
 
-            # issue REQUEST 
-            req = cached_session.get(idna, headers=headers, verify=True)
-            content = req.content
-            resp = dict(**req.headers)
+            c_req = cached_session.get(idna, headers=headers, verify=True)
+            content = c_req.content
+         
+            resp = fakeResponse(c_req)
 
             # unchanged detection
             resp['-content-hash'] = md5(content or '').hexdigest()
-            #if resp.status == 200:
-            #    if resp.fromcache:
-            #        resp.status = 304
-            #    elif feed_info.feed.has_key('planet_content_hash') and \
-            #        feed_info.feed['planet_content_hash'] == \
-            #        resp['-content-hash']:
-            #        resp.status = 304
+            if resp.status == 200:
+                if resp.fromcache:
+                    resp.status = 304
+                elif feed_info.feed.has_key('planet_content_hash') and \
+                    feed_info.feed['planet_content_hash'] == \
+                    resp['-content-hash']:
+                    resp.status = 304
 
             # build a file-like object
-            feed = StringIO(content)
-            feed.url = resp.get('content-location', uri)
-            if 'content-encoding' in resp:
+            feed = StringIO(content) 
+            setattr(feed, 'url', resp.get('content-location', uri))
+            if resp.has_key('content-encoding'):
                 del resp['content-encoding']
-            feed.headers = resp
+            setattr(feed, 'headers', resp)
+
 
         except requests.HTTPError, e:
             log.error("HTTP error when requesting %s: %s", uri, e)
@@ -361,13 +399,13 @@ def httpThread(thread_index, input_queue, output_queue, log):
         except requests.RequestException, e:
             log.error("An ambiguous exception occured while requesting %s in thread %d: %s.",
                 uri, thread_index, e)
-        #probably need something in here for caching errors. But what?
+            
         except socket.error, e:
             if e.__class__.__name__.lower()=='timeout':
                 feed.headers['status'] = '408'
                 log.warn("Timeout in thread-%d", thread_index)
             else:
-                log.error("HTTP Error: %s in thread-%d", str(e), thread_index)
+                logierror("HTTP Error: %s in thread-%d", str(e), thread_index)
         except Exception, e:
             import sys, traceback
             type, value, tb = sys.exc_info()
@@ -450,9 +488,9 @@ def spiderPlanet(only_if_new = False):
             (uri, feed_info, feed) = parse_queue.get(False)
             try:
 
-                if 'headers' not in feed or int(feed.headers.status)<300:
+                if not hasattr(feed,'headers') or int(feed.headers.status)<300:
                     options = {}
-                    if 'feed' not in feed_info:
+                    if hasattr(feed_info,'feed'):
                         options['etag'] = \
                             feed_info.feed.get('planet_http_etag',None)
                         try:
@@ -461,15 +499,18 @@ def spiderPlanet(only_if_new = False):
                                 None))
                         except:
                             pass
+
                     data = feedparser.parse(feed, **options)
                 else:
                     data = feedparser.FeedParserDict({'version': None,
                         'headers': feed.headers, 'entries': [], 'feed': {},
                         'href': feed.url, 'bozo': 0,
                         'status': int(feed.headers.status)})
+
                 # duplicate feed?
                 id = data.feed.get('id', None)
                 if not id: id = feed_info.feed.get('id', None)
+
                 href=uri
                 if data.has_key('href'): href=data.href
 
