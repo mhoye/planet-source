@@ -290,10 +290,9 @@ def writeCache(feed_uri, feed_info, data):
 
 
 def fakeResponse(req):
-
-""" Replacing httplib2 with Requests without rewriting the planet (har har)
-    means that we need to assemble a fake Response object out of the header set
-    returned by a Request. Shenanigans ahead. """
+    """ Replacing httplib2 with Requests without rewriting the planet (har har)
+        means that we need to assemble a fake Response object out of the header set
+        returned by a Request. Shenanigans ahead. """
 
     import httplib2 
     info = dict()
