@@ -402,7 +402,7 @@ def httpThread(thread_index, input_queue, output_queue, log):
                 feed.headers['status'] = '408'
                 log.warn("Timeout in thread-%d", thread_index)
             else:
-                logierror("HTTP Error: %s in thread-%d", str(e), thread_index)
+                log.error("HTTP Error: %s in thread-%d", str(e), thread_index)
         except Exception, e:
             import sys, traceback
             type, value, tb = sys.exc_info()
