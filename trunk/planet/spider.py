@@ -243,8 +243,6 @@ def writeCache(feed_uri, feed_info, data):
                 index[filename('', entry.id)] = feedid
 
     if index: index.close()
-
-    print config.activity_threshold(feed_uri)
     # identify inactive feeds
     if config.activity_threshold(feed_uri):
         updated = [entry.updated_parsed for entry in data.entries
@@ -317,9 +315,9 @@ def fakeResponse(req):
     fake.version   = '11'    
     fake.reason    = req.reason  
 
-    if req.history :
+    try:
         fake.previous = (req.history[-2]).url
-    else:
+    except:
         fake.previous = req.url
 
     setattr(fake, 'content-location', req.url)
